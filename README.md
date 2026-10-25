@@ -1,28 +1,27 @@
-Pipeline:
+**Pipeline:**
 
-[1. Scrape Raw Data] 
-       │
-       ▼
+```text
+[1. Scrape Raw Data]
+│
+▼
 [2. Raw Data Storage] (Lưu file thô từng domain: tiki.csv, banking.csv,...)
-       │
-       ▼
+│
+▼
 [3. Data Cleaning & Normalization] (Xóa dòng trùng, xử lý giá trị null, chuẩn hóa ngày tháng)
-       │
-       ▼
+│
+▼
 [4. Schema Mapping & Merging] (Áp dụng Unified Schema chung và gộp vào một Master Dataset)
-       │
-       ▼
+│
+▼
 [5. NLP & Sentiment Processing] (Tính Word Count, gán nhãn cảm xúc, phân tích khía cạnh)
-       │
-       ▼
+│
+▼
 [6. Final Aggregated Database] (Bảng dữ liệu hoàn chỉnh sẵn sàng cho BI)
-       │
-       ▼
+│
+▼
 [7. BI Dashboard & Insights] (Trực quan hóa, ... )
 
-
-
-Kiến trúc dự án
+Kiến trúc dự án:
 multi-domain-sentiment-bigdata/
 │
 ├── config/                                # Cấu hình hệ thống & kết nối DB
@@ -80,11 +79,8 @@ multi-domain-sentiment-bigdata/
 ├── requirements.txt                       # Danh sách thư viện Python cần thiết (pyspark, kafka-python, pymongo, streamlit...)
 └── README.md                              # Tài liệu hướng dẫn cài đặt và mô tả đồ án cho giảng viên
 
+Yêu cầu hệ thống:
 Python: 3.10.11 (Bắt buộc dùng nhánh 3.10. Tuyệt đối không dùng 3.11 hay 3.12 vì cấu trúc tuần tự hóa dữ liệu sẽ gây lỗi crash cho PySpark).
-
 Java Development Kit (JDK): 11 (OpenJDK 11 hoặc Oracle JDK 11). Dù JDK 17 đã ra mắt, JDK 11 vẫn là phiên bản có độ ổn định cao nhất khi chạy nền cho PySpark 3.5.
-
 Hadoop (winutils): 3.3.6.
-
-Docker Desktop: Phiên bản mới nhất.
-
+Docker Desktop: Phiên bản mới nhất.   

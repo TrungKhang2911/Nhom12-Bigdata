@@ -19,9 +19,12 @@
 [6. Final Aggregated Database] (Bảng dữ liệu hoàn chỉnh sẵn sàng cho BI)
 │
 ▼
-[7. BI Dashboard & Insights] (Trực quan hóa, ... )
+[7. BI Dashboard & Insights] (Trực quan hóa, ... ).
 
-Kiến trúc dự án:
+**Kiến trúc dự án:**
+
+```text
+
 multi-domain-sentiment-bigdata/
 │
 ├── config/                                # Cấu hình hệ thống & kết nối DB
@@ -78,6 +81,33 @@ multi-domain-sentiment-bigdata/
 ├── docker-compose.yml                     # Cấu hình hạ tầng Big Data tối giản (Chỉ khởi tạo Kafka, Zookeeper, MongoDB)
 ├── requirements.txt                       # Danh sách thư viện Python cần thiết (pyspark, kafka-python, pymongo, streamlit...)
 └── README.md                              # Tài liệu hướng dẫn cài đặt và mô tả đồ án cho giảng viên
+
+## Cấu Trúc Dữ Liệu (Unified Schema)
+
+**1. Nhóm thông tin định danh & Nguồn (Metadata & Source)**
+- **`record_id`**: Mã định danh duy nhất cho mỗi dòng dữ liệu (UUID) để dễ dàng quản lý và tránh trùng lặp.
+- **`source_domain`**: Nguồn thu thập dữ liệu (VD: tiki, shopee, google_play, app_store). Phục vụ cho bộ lọc trên BI Dashboard.
+- **`domain_type`**: Phân loại ngành hàng tổng quát (VD: e-commerce, mobile_app, banking).
+
+**2. Nhóm thông tin Đối tượng đánh giá (Item Details)**
+- **`item_id`**: Mã sản phẩm (SKU) hoặc ID ứng dụng (Package Name/App ID).
+- **`item_name`**: Tên sản phẩm hoặc tên ứng dụng.
+- **`category`**: Ngành hàng hoặc Thể loại ứng dụng (VD: Điện thoại, Finance, Game).
+- **`brand_or_developer`**: Tên thương hiệu sản phẩm hoặc nhà phát triển ứng dụng.
+
+**3. Nhóm thông tin Đánh giá gốc (Raw Review Data - Qua bước 3)**
+- **`user_name`**: Tên người dùng hoặc ID người dùng (đã ẩn danh hóa nếu cần).
+- **`rating`**: Điểm số sao đánh giá (từ 1 đến 5).
+- **`review_time`**: Thời gian đánh giá đã được chuẩn hóa định dạng chung (VD: YYYY-MM-DD HH:MM:SS).
+- **`helpful_votes`**: Số lượt hữu ích/like mà bình luận nhận được (để BI ưu tiên hiển thị các bình luận có độ tin cậy cao).
+- **`raw_text`**: Nội dung bình luận nguyên gốc (dùng để đối chiếu khi cần).
+
+**4. Nhóm dữ liệu Xử lý ngôn ngữ & Cảm xúc (NLP & Sentiment - Qua bước 5)**
+- **`cleaned_text`**: Văn bản đã qua làm sạch (chuẩn hóa Unicode, xóa emoji, dịch teencode, loại bỏ ký tự nhiễu).
+- **`word_count`**: Số lượng từ trong `cleaned_text`. (Dùng để lọc các bình luận quá ngắn/spam trên BI).
+- **`sentiment_score`**: Điểm số cảm xúc do mô hình AI dự đoán (từ 0.0 đến 1.0, hoặc -1.0 đến 1.0).
+- **`sentiment_label`**: Nhãn phân loại cảm xúc (VD: Positive, Negative, Neutral).
+- **`aspects`**: Dữ liệu dạng JSON/Array trích xuất các khía cạnh và cảm xúc tương ứng. (VD: `[{"aspect": "giao hàng", "sentiment": "negative"}, {"aspect": "chất lượng", "sentiment": "positive"}]`).
 
 Yêu cầu hệ thống:
 Python: 3.10.11 (Bắt buộc dùng nhánh 3.10. Tuyệt đối không dùng 3.11 hay 3.12 vì cấu trúc tuần tự hóa dữ liệu sẽ gây lỗi crash cho PySpark).

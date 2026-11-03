@@ -1,0 +1,2 @@
+# Keep the original dependency list compatible with existing setup commands.
+-r requirement.txt

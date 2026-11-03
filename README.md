@@ -20,6 +20,7 @@
 │
 ▼
 [7. BI Dashboard & Insights] (Trực quan hóa, ... ).
+```
 
 **Kiến trúc dự án:**
 
@@ -81,6 +82,7 @@ multi-domain-sentiment-bigdata/
 ├── docker-compose.yml                     # Cấu hình hạ tầng Big Data tối giản (Chỉ khởi tạo Kafka, Zookeeper, MongoDB)
 ├── requirements.txt                       # Danh sách thư viện Python cần thiết (pyspark, kafka-python, pymongo, streamlit...)
 └── README.md                              # Tài liệu hướng dẫn cài đặt và mô tả đồ án cho giảng viên
+```
 
 ## Cấu Trúc Dữ Liệu (Unified Schema)
 
@@ -114,3 +116,49 @@ Python: 3.10.11 (Bắt buộc dùng nhánh 3.10. Tuyệt đối không dùng 3.1
 Java Development Kit (JDK): 11 (OpenJDK 11 hoặc Oracle JDK 11). Dù JDK 17 đã ra mắt, JDK 11 vẫn là phiên bản có độ ổn định cao nhất khi chạy nền cho PySpark 3.5.
 Hadoop (winutils): 3.3.6.
 Docker Desktop: Phiên bản mới nhất.   
+
+## Trạng thái triển khai
+
+Đã dựng cấu trúc trên ngay tại thư mục gốc repository. Crawler Google Play và
+App Store được triển khai tại `src/ingestion/gplay_crawler.py` và
+`src/ingestion/appstore_crawler.py`, có CLI đơn giản lưu JSONL và tùy chọn Kafka.
+Luồng thu thập local hoàn thiện chạy qua `src/ingestion/collect.py`, sử dụng
+adapter phân trang `source_pages.py`: xuất **JSON + JSONL + CSV**, checkpoint
+SQLite, timeout, tiếp tục job khác khi lỗi và báo cáo số lượng thiếu.
+Kafka được để lại cho giai đoạn tích hợp sau.
+Thêm `data/raw/` để lưu dữ liệu thu thập cục bộ, `tests/` để kiểm thử và
+`src/processing/schema_mappers/appstore_mapper.py` làm khung tích hợp Apple.
+
+Các module Tiki, Shopee, Spark, schema mapper, NLP, MongoDB client và UI hiện
+**chỉ là khung cho các thành viên khác**, chưa có xử lý nghiệp vụ. Hai notebook
+là notebook khởi tạo. File Parquet chỉ được tạo khi pipeline xử lý thực sự có
+dữ liệu; repository không chứa file Parquet giả.
+
+## Chạy crawler nhanh (PowerShell)
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-crawler.txt
+Copy-Item .env.example .env
+
+# Sửa danh sách app và limit trong file cấu hình theo chỉ tiêu của nhóm
+Copy-Item config/crawl_jobs.example.json config/crawl_jobs.json
+
+# Thu thập cả hai nguồn, xuất JSON + JSONL + CSV; chạy lại cùng lệnh để resume
+.\.venv\Scripts\python.exe -m src.ingestion.collect --config config/crawl_jobs.json --output-dir data/raw/mobile_reviews
+
+# Kiểm thử không gọi API thật
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Nếu `.venv` đã được chuẩn bị trong workspace thì dùng trực tiếp Python trong
+đó, không cần tạo lại. Crawler chạy độc lập, không cần Java, Spark hay Docker.
+Cài toàn bộ dependencies cho các phần khác bằng `pip install -r requirements.txt`
+(file này tham chiếu danh sách gốc `requirement.txt`).
+
+README hiện không có chỉ tiêu số review hay danh sách ứng dụng bắt buộc. Cấu hình
+mẫu là Facebook/Instagram tại VN, mục tiêu mẫu tổng 3.000 review; đây không phải
+chỉ tiêu của đề. Nếu nguồn không đủ, `report.json` ghi rõ số thiếu.
+
+Xem [hướng dẫn crawler](docs/crawlers.md) để cấu hình ứng dụng, xuất dữ liệu,
+chạy tiếp khi gián đoạn và hiểu giới hạn từng nguồn.

@@ -3,18 +3,37 @@ import csv
 import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.ingestion.common import dumps
+
+# Sources exported together: any job in a group regenerates every file of that
+# group, so a Google-only run still rewrites app_store.* as before.
+SOURCE_GROUPS = (('google_play', 'app_store'), ('tiki',), ('shopee',))
 
 
 def job_key(job):
     return dumps([job['source'], job['app_id'], job['country'], job['language']])
 
 
+def export_sources(keys):
+    used = {json.loads(key)[0] for key in keys}
+    return [source for group in SOURCE_GROUPS if used.intersection(group) for source in group]
+
+
 def review_key(event):
-    raw = event['review']
-    value = raw.get('reviewId') if event['source_domain'] == 'google_play' else raw.get('id', {}).get('label')
+    raw, source = event['review'], event['source_domain']
+    if source == 'google_play':
+        value = raw.get('reviewId')
+    elif source == 'app_store':
+        value = raw.get('id', {}).get('label')
+    elif source == 'tiki':
+        value = raw.get('id')
+    elif source == 'shopee':
+        value = raw.get('cmtid')
+    else:
+        value = None
     if value:
         return str(value)
     # Stable fallback only for retry bookkeeping; never modify the payload.
@@ -77,12 +96,13 @@ class Dataset:
 
     def export(self, keys):
         """Stream only jobs in this run; stage each file before replacing it."""
+        keys = list(keys)
         self.db.execute('CREATE TEMP TABLE IF NOT EXISTS export_jobs (job_key TEXT PRIMARY KEY)')
         self.db.execute('DELETE FROM export_jobs')
         self.db.executemany('INSERT INTO export_jobs VALUES (?)', ((key,) for key in keys))
         self.db.commit()
         outputs = {}
-        for source in ('google_play', 'app_store'):
+        for source in export_sources(keys):
             paths = {ext: self.folder / f'{source}.{ext}' for ext in ('json', 'jsonl', 'csv')}
             temps = {ext: path.with_suffix(path.suffix + '.tmp') for ext, path in paths.items()}
             fields = ['source_domain', 'item_id', 'country', 'language', 'collected_at',
@@ -109,10 +129,25 @@ class Dataset:
         return outputs
 
 
+def epoch_iso(value):
+    """Display Unix seconds as ISO 8601 UTC; leave any other value unchanged."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(value, timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+    return value
+
+
 def csv_row(event):
     raw = event['review']
     if event['source_domain'] == 'google_play':
         text, rating, when = raw.get('content'), raw.get('score'), raw.get('at')
+    elif event['source_domain'] == 'tiki':
+        # Tiki titles are star-rating templates ("Cực kì hài lòng"); content is the user's text.
+        text, rating, when = raw.get('content'), raw.get('rating'), epoch_iso(raw.get('created_at'))
+    elif event['source_domain'] == 'shopee':
+        text, rating, when = raw.get('comment'), raw.get('rating_star'), epoch_iso(raw.get('ctime'))
     else:
         text = raw.get('content', {}).get('label')
         rating = raw.get('im:rating', {}).get('label')

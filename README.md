@@ -129,7 +129,13 @@ Kafka được để lại cho giai đoạn tích hợp sau.
 Thêm `data/raw/` để lưu dữ liệu thu thập cục bộ, `tests/` để kiểm thử và
 `src/processing/schema_mappers/appstore_mapper.py` làm khung tích hợp Apple.
 
-Các module Tiki, Shopee, Spark, schema mapper, NLP, MongoDB client và UI hiện
+Crawler **Tiki** (`src/ingestion/tiki_crawler.py`) dùng chung luồng `collect.py`
+ở trên (checkpoint, resume, report, xuất `tiki.json`/`tiki.jsonl`/`tiki.csv`).
+Crawler **Shopee** chưa làm được: Shopee chặn mọi API công khai bằng anti-bot
+(HTTP 403, error 90309999); phương án thay thế đang chờ nhóm quyết định, xem
+mục Shopee trong [docs/crawlers.md](docs/crawlers.md).
+
+Các module Shopee, Spark, schema mapper, NLP, MongoDB client và UI hiện
 **chỉ là khung cho các thành viên khác**, chưa có xử lý nghiệp vụ. Hai notebook
 là notebook khởi tạo. File Parquet chỉ được tạo khi pipeline xử lý thực sự có
 dữ liệu; repository không chứa file Parquet giả.
@@ -146,6 +152,10 @@ Copy-Item config/crawl_jobs.example.json config/crawl_jobs.json
 
 # Thu thập cả hai nguồn, xuất JSON + JSONL + CSV; chạy lại cùng lệnh để resume
 .\.venv\Scripts\python.exe -m src.ingestion.collect --config config/crawl_jobs.json --output-dir data/raw/mobile_reviews
+
+# Tiki: cùng lệnh, file cấu hình và thư mục riêng
+Copy-Item config/crawl_jobs.tiki.example.json config/crawl_jobs.tiki.json
+.\.venv\Scripts\python.exe -m src.ingestion.collect --config config/crawl_jobs.tiki.json --output-dir data/raw/ecommerce_reviews
 
 # Kiểm thử không gọi API thật
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v

@@ -1,4 +1,7 @@
-# Thu thập Google Play / App Store
+# Thu thập Google Play / App Store / Tiki
+
+Phần đầu mô tả Google Play và App Store; cấu hình, đầu ra, checkpoint và exit code
+dùng chung cho Tiki. Riêng Tiki và Shopee xem [mục Tiki](#tiki) và [mục Shopee](#shopee).
 
 ## Chạy local, xuất JSON và CSV
 
@@ -144,6 +147,98 @@ không phải toàn bộ phản hồi HTTP nguyên bản.
 
 Unified Schema, làm sạch, xóa trùng nội dung, NLP thuộc processing. Trường nguồn
 không trả phải để thiếu/null, không điền dữ liệu giả. Kafka để giai đoạn sau.
+
+## Tiki
+
+```powershell
+Copy-Item config/crawl_jobs.tiki.example.json config/crawl_jobs.tiki.json
+.\.venv\Scripts\python.exe -m src.ingestion.collect --config config/crawl_jobs.tiki.json --output-dir data/raw/ecommerce_reviews
+```
+
+Cùng lệnh `src.ingestion.collect`, nên `delay`, `attempts`, `timeout`,
+`max_batches`, `--restart-cursors`, `--export-only`, `report.json` và exit code
+giống hệt các mục trên.
+
+```json
+{"source": "tiki", "app_id": "52789367", "country": "vn", "limit": 1000}
+```
+
+- `app_id`: **ID sản phẩm dạng số**, phần sau `-p` trong URL. Ví dụ
+  `https://tiki.vn/sach-nha-gia-kim-p52789367.html?spid=52789368` → `"52789367"`
+  (không dùng `spid`).
+- `country` chỉ nhận `"vn"` (mặc định khi bỏ trống). Không đặt `language`.
+- Job Tiki có thể nằm chung file với Google/Apple, nhưng nên dùng thư mục riêng
+  `data/raw/ecommerce_reviews`. Thư mục chỉ có job Tiki sinh `tiki.json`,
+  `tiki.jsonl`, `tiki.csv`, không sinh file `google_play`/`app_store`.
+
+### Nguồn và giới hạn
+
+- API công khai mà trang sản phẩm tiki.vn tự gọi, không cần đăng nhập:
+  `GET https://tiki.vn/api/v2/products/{id}` (metadata sản phẩm) và
+  `GET https://tiki.vn/api/v2/reviews?product_id={id}&page={n}&limit=20&sort=id|desc`.
+- Tối đa **20 review/trang**; lớn hơn Tiki trả HTTP 400. Đọc từ mới nhất, con trỏ
+  resume là số trang, dừng ở `paging.last_page`. Review mới chỉ đẩy review cũ
+  xuống trang sau, nên chạy tiếp chỉ đọc lại vài review (bỏ qua theo ID), không
+  bỏ sót. Job đã `source_exhausted` sẽ không tự lấy review mới; dùng
+  `--restart-cursors`.
+- **Đa số review Tiki chỉ chấm sao, không có nội dung**: `content` rỗng còn
+  `title` là câu mẫu theo số sao ("Cực kì hài lòng"). `limit` đếm cả review rỗng
+  vì ingestion không lọc; nhóm processing lọc theo `word_count`. Bộ mẫu 2.300
+  review chỉ có 29% kèm nội dung (24–40% tùy sản phẩm, xem
+  [verification.md](verification.md)). Cần N review có chữ thì đặt `limit`
+  khoảng 3–4 lần N.
+- `paging.total` của API review có thể lớn hơn `review_count` hiển thị trên sản
+  phẩm (Nhà Giả Kim: 7.205 so với 6.092), vì có thể gồm review của nhà bán khác.
+- Metadata sản phẩm (15–35 nghìn ký tự: mô tả HTML, ảnh, nhà bán khác, biến
+  thể...) lặp lại trong mỗi review, giống cách Google/Apple lưu `app`, nên file
+  lớn: bộ mẫu 2.300 review khoảng 62 MB mỗi định dạng. Sản phẩm có metadata trên
+  32.767 ký tự vượt giới hạn một ô Excel, nên cột `app_json` sẽ bị cắt hoặc làm
+  lệch dòng khi mở CSV bằng Excel. Dữ liệu trong file vẫn đầy đủ; đọc bằng
+  Python/pandas hoặc dùng file JSON/JSONL.
+
+### Ánh xạ trường cho nhóm processing
+
+Envelope giống Google/Apple. Khóa `app` chứa metadata **sản phẩm**, `language`
+là null, `item_id` là ID sản phẩm.
+
+| Trường | Tiki |
+| --- | --- |
+| ID review | `review.id` |
+| Tên sản phẩm | `app.name` |
+| Thương hiệu | `app.brand.name` (sách thường null; xem `app.authors`) |
+| Nhà bán | `review.seller.name` |
+| Ngành hàng | `app.categories.name` |
+| Người đánh giá | `review.created_by.name` |
+| Điểm sao | `review.rating` |
+| Nội dung | `review.content` (có thể rỗng) |
+| Ngày review | `review.created_at` (Unix giây, UTC) |
+| Lượt hữu ích | `review.thank_count` |
+
+Cột `review_time` trong CSV hiển thị `created_at` dạng ISO 8601 UTC, ví dụ
+`2026-10-21T08:09:57+00:00` (15:09:57 giờ Việt Nam). Giá trị số gốc vẫn nằm
+trong `review_json` và file JSON.
+
+## Shopee
+
+**Chưa thu thập được (kiểm tra ngày 2026-11-04).** Mọi endpoint công khai đã thử
+(`/api/v2/item/get_ratings`, `/api/v4/item/get_ratings`, `/api/v4/search/search_items`,
+`/api/v4/pdp/get_pc`) đều trả HTTP 403 với `{"error": 90309999, "is_login": false}`.
+Shopee yêu cầu phiên đăng nhập kèm chữ ký request do JavaScript của họ sinh ra
+(cơ chế anti-bot). Dự án không giả lập chữ ký hay né phát hiện bot: việc này vi
+phạm điều khoản của Shopee và hỏng ngay khi họ đổi thuật toán.
+
+Các phương án đang chờ nhóm chọn:
+
+1. **Bỏ Shopee**, dùng Tiki cho mảng thương mại điện tử. Một sản phẩm phổ biến
+   trên Tiki đã có hàng nghìn review.
+2. **Dùng bộ dữ liệu review Shopee công khai** (Kaggle, Hugging Face...) có giấy
+   phép cho nghiên cứu, viết bộ import về cùng envelope với
+   `source_domain = "shopee"`.
+3. **Thu thập thủ công lượng nhỏ**: mở trang sản phẩm bằng trình duyệt, lưu phản
+   hồi `get_ratings` từ DevTools → Network thành file JSON, rồi viết bộ import
+   offline. Tốn công, chỉ hợp với vài trăm review.
+
+`collect.py` hiện từ chối job `"source": "shopee"` ngay khi đọc cấu hình.
 
 ## CLI cũ và kiểm thử
 

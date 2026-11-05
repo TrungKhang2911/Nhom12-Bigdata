@@ -15,6 +15,18 @@ from src.ingestion.source_pages import pages
 
 logger = logging.getLogger(__name__)
 
+# Supported job sources and their app_id format. Tiki uses the numeric product
+# ID after "-p" in a product URL, e.g. .../sach-nha-gia-kim-p52789367.html.
+# Shopee uses "<shopid>.<itemid>" from shopee.vn/product/<shopid>/<itemid>
+# or .../<name>-i.<shopid>.<itemid>.
+ID_PATTERNS = {
+    'google_play': r'[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+',
+    'app_store': r'[0-9]+',
+    'tiki': r'[0-9]+',
+    'shopee': r'[0-9]+\.[0-9]+',
+}
+VIETNAM_ONLY = ('tiki', 'shopee')
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -45,10 +57,9 @@ def load_config(path):
             raise ValueError('Unknown job keys; use source/app_id/country/language/limit')
         source, app_id = raw.get('source'), raw.get('app_id')
         country, target = raw.get('country', 'vn'), raw.get('limit')
-        if source not in ('google_play', 'app_store') or not isinstance(app_id, str):
-            raise ValueError('Each job requires a supported source and string app_id')
-        pattern = r'[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+' if source == 'google_play' else r'[0-9]+'
-        if not re.fullmatch(pattern, app_id):
+        if not isinstance(source, str) or source not in ID_PATTERNS or not isinstance(app_id, str):
+            raise ValueError(f'Each job requires a string app_id and a source in {sorted(ID_PATTERNS)}')
+        if not re.fullmatch(ID_PATTERNS[source], app_id):
             raise ValueError(f'Invalid app_id: {app_id}')
         if type(target) is not int or not isinstance(country, str):
             raise ValueError('Each job requires an integer limit and string country')
@@ -56,8 +67,10 @@ def load_config(path):
         language = raw.get('language', 'vi') if source == 'google_play' else None
         if source == 'google_play' and (not isinstance(language, str) or not re.fullmatch(r'[a-zA-Z_-]{2,15}', language)):
             raise ValueError('Invalid Google language code')
-        if source == 'app_store' and raw.get('language') is not None:
-            raise ValueError('Apple does not support language filtering; omit language')
+        if source != 'google_play' and raw.get('language') is not None:
+            raise ValueError(f'{source} does not support language filtering; omit language')
+        if source in VIETNAM_ONLY and country.lower() != 'vn':
+            raise ValueError(f'{source} adapter only supports Vietnam; use country "vn" or omit it')
         job = {'source': source, 'app_id': app_id, 'country': country.lower(),
                'language': language, 'limit': target}
         key = job_key(job)
@@ -116,7 +129,8 @@ def collect_job(dataset, job, options, max_batches, restart=False):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Resumable mobile review collection to JSON, JSONL and CSV')
+    parser = argparse.ArgumentParser(
+        description='Resumable review collection (Google Play, App Store, Tiki, Shopee) to JSON, JSONL and CSV')
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, default=Path('data/raw/mobile_reviews'))
     mode = parser.add_mutually_exclusive_group()

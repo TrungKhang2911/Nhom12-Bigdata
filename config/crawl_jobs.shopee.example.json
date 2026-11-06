@@ -1,0 +1,9 @@
+{
+  "delay": 1.0,
+  "attempts": 3,
+  "timeout": 45,
+  "max_batches": 1000,
+  "jobs": [
+    {"source": "shopee", "app_id": "3932239.1671068614", "country": "vn", "limit": 100}
+  ]
+}

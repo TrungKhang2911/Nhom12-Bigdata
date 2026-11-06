@@ -7,6 +7,8 @@ from google_play_scraper.features.reviews import _ContinuationToken
 
 from src.ingestion.common import envelope, retry
 from src.ingestion.google_transport import call
+from src.ingestion.shopee_crawler import pages as shopee_pages
+from src.ingestion.tiki_crawler import pages as tiki_pages
 
 
 def google_pages(job, cursor, *, delay, attempts, timeout):
@@ -73,5 +75,6 @@ def apple_pages(job, cursor, *, delay, attempts, timeout):
 
 
 def pages(job, cursor, **options):
-    adapter = google_pages if job['source'] == 'google_play' else apple_pages
-    return adapter(job, cursor, **options)
+    adapters = {'google_play': google_pages, 'app_store': apple_pages,
+                'tiki': tiki_pages, 'shopee': shopee_pages}
+    return adapters[job['source']](job, cursor, **options)

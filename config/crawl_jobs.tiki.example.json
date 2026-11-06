@@ -1,0 +1,12 @@
+{
+  "delay": 1.0,
+  "attempts": 3,
+  "timeout": 45,
+  "max_batches": 1000,
+  "jobs": [
+    {"source": "tiki", "app_id": "52789367", "country": "vn", "limit": 1000},
+    {"source": "tiki", "app_id": "111285062", "country": "vn", "limit": 500},
+    {"source": "tiki", "app_id": "56859344", "country": "vn", "limit": 500},
+    {"source": "tiki", "app_id": "120552065", "country": "vn", "limit": 300}
+  ]
+}

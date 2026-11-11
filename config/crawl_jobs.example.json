@@ -1,0 +1,12 @@
+{
+  "delay": 1.0,
+  "attempts": 3,
+  "timeout": 45,
+  "max_batches": 1000,
+  "jobs": [
+    {"source": "google_play", "app_id": "com.facebook.katana", "country": "vn", "language": "vi", "limit": 1000},
+    {"source": "google_play", "app_id": "com.instagram.android", "country": "vn", "language": "vi", "limit": 1000},
+    {"source": "app_store", "app_id": "284882215", "country": "vn", "limit": 500},
+    {"source": "app_store", "app_id": "389801252", "country": "vn", "limit": 500}
+  ]
+}

@@ -1,0 +1,14 @@
+.venv/
+.runtime/
+__pycache__/
+*.py[cod]
+.env
+.pytest_cache/
+data/*
+!data/raw/
+!data/gold_processed/
+data/raw/*
+data/gold_processed/*
+!data/**/.gitkeep
+*.log
+.ipynb_checkpoints/

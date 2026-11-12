@@ -19,3 +19,5 @@ plotly==5.20.0
 
 # Tiện ích
 python-dotenv==1.0.1
+pyvi==0.1.1
+joblib==1.4.2

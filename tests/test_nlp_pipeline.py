@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import unittest
+import unicodedata
+from unittest.mock import patch
 import pandas as pd
 
 from src.processing.nlp_pipeline import SentimentNLPPipeline, generate_nlp_statistics_report
@@ -151,6 +153,67 @@ class TestNLPPipeline(unittest.TestCase):
         self.assertEqual(stats["total_reviews"], 4)
         self.assertEqual(stats["null_comments_count"], 1)
         self.assertEqual(stats["non_empty_comments_count"], 3)
+
+    def test_negated_praise_is_negative_regardless_of_stars(self):
+        complaint = "chất lượng kém , giao hàng chậm , shipper thái độ ko tốt"
+        cases = [
+            complaint, unicodedata.normalize("NFD", complaint),
+            "Dịch vụ không tốt", "Không hài lòng", "Sản phẩm chẳng đẹp",
+            "Ứng dụng chưa tốt", "Nhân viên không hề nhiệt tình",
+            "Ứng dụng đẹp nhưng không dễ dùng", "Sách hay, không hài lòng với dịch vụ",
+            "Sách đẹp, đóng gói tệ",
+        ]
+        for text in cases:
+            for stars in (None, 1, 2, 3, 4, 5):
+                with self.subTest(text=text, stars=stars):
+                    _, _, score, label, _, status = self.pipeline.analyze_review(text, stars)
+                    self.assertEqual(label, "Negative")
+                    self.assertLess(score, 0.40)
+                    self.assertEqual(status, "VALID_TEXT")
+
+    def test_neutral_reviews_with_subjects_and_short_forms(self):
+        for text in (
+            "Sách bình thường", "Chất lượng cũng được", "Ứng dụng dùng tạm được",
+            "Sản phẩm này thì tạm ổn", "Dịch vụ chấp nhận được", "App bth",
+            "Không tốt cũng không tệ", "Sản phẩm không tốt cũng không tệ.",
+            "Sách đẹp, bìa hơi bụi", "Sách đẹp nhưng hơi cũ",
+        ):
+            for stars in (1, 5):
+                with self.subTest(text=text, stars=stars):
+                    _, _, score, label, _, status = self.pipeline.analyze_review(text, stars)
+                    self.assertEqual(label, "Neutral")
+                    self.assertGreaterEqual(score, 0.40)
+                    self.assertLessEqual(score, 0.60)
+                    self.assertEqual(status, "VALID_TEXT")
+
+    def test_neutral_phrase_does_not_hide_complaint_or_praise(self):
+        cases = [
+            ("Tạm ổn nhưng sản phẩm bị hỏng", "Negative"),
+            ("Sách bình thường nhưng dịch vụ tệ", "Negative"),
+            ("Sách không chỉ đẹp mà còn rất hay", "Positive"),
+            ("App không hề lag, chạy mượt và dễ dùng", "Positive"),
+            ("Sách rất hay, đóng gói cẩn thận", "Positive"),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(self.pipeline.analyze_review(text, 3)[3], expected)
+
+    def test_negation_rules_work_without_model_and_in_aspects(self):
+        with patch.object(self.pipeline, "svm_engine", None):
+            cases = [
+                ("Chất lượng kém, dịch vụ ko tốt", "Negative"),
+                ("Sản phẩm không hài lòng", "Negative"),
+                ("Chất lượng bình thường", "Neutral"),
+                ("Sách đẹp, bìa hơi bụi", "Neutral"),
+                ("Sách không chỉ đẹp mà còn hay", "Positive"),
+            ]
+            for text, expected in cases:
+                with self.subTest(text=text):
+                    self.assertEqual(self.pipeline.analyze_review(text, 5)[3], expected)
+        for text in ("Dịch vụ không tốt", "Nhân viên chẳng nhiệt tình"):
+            result = self.pipeline.analyze_review(text, 5)
+            aspects = {a["aspect"]: a["sentiment"] for a in json.loads(result[4])}
+            self.assertEqual(aspects["dịch vụ"], "negative")
 
     def test_ui_nlp_integration_and_visual_builders(self):
         from src.ui.app import (

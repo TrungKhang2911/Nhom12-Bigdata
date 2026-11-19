@@ -74,6 +74,8 @@ else:
 # 1. CÁC QUY TẮC NGỮ PHÁP & TỪ ĐIỂN ĐA LĨNH VỰC (TỔNG QUÁT HÓA 100%)
 # ============================================================================
 
+NLP_PIPELINE_VERSION = "2.2-negation-neutral"
+
 # 1.1. Mẫu cấu trúc Spam quảng cáo, tài chính đen, tuyển CTV, link rác, cày xu
 SPAM_STRUCTURAL_REGEX = re.compile(
     r'(vô\s+trang|vay\s*\d+\s*%|kiếm\s+tiền\s+(0\s+vốn|online|tại\s+nhà)|'
@@ -152,6 +154,37 @@ NEUTRAL_HEDGE_WORDS = re.compile(
     r'mới\s+dùng.*cũng\s+được|dùng\s+tạm)[\s.!]*$',
     re.IGNORECASE,
 )
+
+# Rule matching uses unsegmented text and must not count negated praise as praise.
+NEGATED_PRAISE_REGEX = re.compile(
+    r'\b(?:không|chẳng|chả|chưa)\s+(?:(?:hề|thật\s+sự|thực\s+sự|được|rất|quá)\s+)?'
+    r'(?:' + STRONG_POS_WORDS.pattern + r'|ổn\b)', re.IGNORECASE,
+)
+NEUTRAL_REVIEW_REGEX = re.compile(
+    r'^(?:(?:sách|sản\s+phẩm|hàng|app|ứng\s+dụng|game|chất\s+lượng|dịch\s+vụ|'
+    r'nội\s+dung|giao\s+hàng)(?:\s+này)?\s+)?'
+    r'(?:(?:thì|thấy|dùng|xài|sử\s+dụng)\s+)?'
+    r'(?:bình\s+thường|cũng\s+(?:được|ổn|ok)|tạm\s+(?:ổn|được)|'
+    r'dùng\s+tạm(?:\s+được)?|tạm\s+dùng\s+được|chấp\s+nhận\s+được|'
+    r'không\s+tốt\s+(?:cũng\s+)?(?:không|chẳng)\s+tệ)'
+    r'(?:\s+(?:thôi|ạ|nhé))?[\s.!]*$', re.IGNORECASE,
+)
+
+
+def _normalize_rule_text(text: str) -> str:
+    text = unicodedata.normalize('NFC', unicodedata.normalize('NFKC', text)).lower().replace('_', ' ')
+    text = re.sub(r'\b(?:ko|k|kh|khg|kg|hok|hong|hg|khong)\b', 'không', text)
+    text = re.sub(r'\b(?:bt|bth|bthuong)\b', 'bình thường', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _polarity_rule_text(text: str) -> str:
+    """Resolve local negation before scanning positive/negative vocabulary."""
+    text = _normalize_rule_text(text)
+    text = NEGATED_DEFECT_REGEX.sub(' tốt ', text)
+    text = re.sub(r'\b(?:không|chẳng|chả)\s+(?:hề\s+)?(?:tệ|kém)\b', ' ổn ', text)
+    return NEGATED_PRAISE_REGEX.sub(' tệ ', text)
+
 
 CONTRAST_WORDS = re.compile(
     r'\b(nhưng|tuy\s+nhiên|tuy_nhiên|bù\s+lại|tiếc\s+là|có\s+điều|nhưng\s+mà|mỗi\s+tội|ngoại\s+trừ|mặc\s+dù|mà\s+đợt\s+này)\b',
@@ -573,7 +606,7 @@ def extract_aspects(raw_text: str, overall_label: str) -> str:
     """Tách câu theo mệnh đề và trích xuất khía cạnh + cảm xúc dạng chuỗi JSON."""
     if not raw_text or not isinstance(raw_text, str):
         return "[]"
-    norm_text = unicodedata.normalize('NFC', unicodedata.normalize('NFKC', raw_text))
+    norm_text = _normalize_rule_text(raw_text)
     clauses = re.split(
         r'[.!?\n;]+|\b(?:nhưng|tuy nhiên|bù lại|ngoại trừ|có điều|mỗi tội)\b',
         norm_text,
@@ -584,7 +617,7 @@ def extract_aspects(raw_text: str, overall_label: str) -> str:
         c_str = clause.strip()
         if not c_str:
             continue
-        c_no_neg_def = NEGATED_DEFECT_REGEX.sub(' tốt ', c_str.lower())
+        c_no_neg_def = _polarity_rule_text(c_str)
         c_no_mild = MILD_NEG_WORDS.sub(' ', c_no_neg_def)
         for asp_name, asp_regex in ASPECT_PATTERNS.items():
             if asp_regex.search(c_str):
@@ -676,13 +709,14 @@ class SentimentNLPPipeline:
                 return "", 0, 0.50, "Neutral", "[]", "FILTERED_OFF_TOPIC"
 
         # Tầng 1.6: Cổng Kiểm Soát Độ Liên Quan Ngữ Nghĩa (Lexical Relevance Gatekeeper)
-        raw_no_neg_defect = NEGATED_DEFECT_REGEX.sub(' tốt ', norm_str)
+        rule_text = _normalize_rule_text(norm_str)
+        raw_no_neg_defect = _polarity_rule_text(rule_text)
         has_mild_neg = bool(MILD_NEG_WORDS.search(raw_no_neg_defect))
         # Loại bỏ cụm giảm nhẹ ("hơi lag", "hơi nhăn") trước khi quét lỗi nghiêm trọng
         raw_no_mild = MILD_NEG_WORDS.sub(' ', raw_no_neg_defect)
         has_strong_neg = bool(STRONG_NEG_WORDS.search(raw_no_mild))
         has_strong_pos = bool(STRONG_POS_WORDS.search(raw_no_neg_defect))
-        has_hedge = bool(NEUTRAL_HEDGE_WORDS.match(norm_str.strip()))
+        has_hedge = bool(NEUTRAL_HEDGE_WORDS.fullmatch(rule_text) or NEUTRAL_REVIEW_REGEX.fullmatch(rule_text))
         has_domain_word = bool(GENERAL_REVIEW_DOMAIN_WORDS.search(norm_str))
         raw_words = set(
             w for w in re.findall(
@@ -760,8 +794,8 @@ class SentimentNLPPipeline:
                 "VALID_TEXT",
             )
 
-        # Tầng 3.5: Phàn nàn nhẹ đơn thuần ("Bìa hơi cũ", "Mau hết pin") -> Neutral
-        if has_mild_neg and not has_strong_neg and not has_strong_pos:
+        # Tầng 3.5: Góp ý nhẹ, kể cả câu khen/chê không dùng từ "nhưng".
+        if has_mild_neg and not has_strong_neg:
             return cleaned, wc, 0.42, "Neutral", extract_aspects(raw_str, "Neutral"), "VALID_TEXT"
 
         # Tầng 3.6: Tiêu cực rõ ràng (Vượt quyền số sao 3*, 4*, 5*)
@@ -776,7 +810,7 @@ class SentimentNLPPipeline:
                 "VALID_TEXT",
             )
 
-        if margin < -0.25 and not has_strong_pos:
+        if margin < -0.25 and (not has_strong_pos or has_strong_neg):
             return (
                 cleaned,
                 wc,

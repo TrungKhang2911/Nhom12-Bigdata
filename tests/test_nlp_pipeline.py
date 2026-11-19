@@ -152,6 +152,44 @@ class TestNLPPipeline(unittest.TestCase):
         self.assertEqual(stats["null_comments_count"], 1)
         self.assertEqual(stats["non_empty_comments_count"], 3)
 
+    def test_ui_nlp_integration_and_visual_builders(self):
+        from src.ui.app import (
+            DISPLAY_COLUMNS,
+            REVIEW_TIME_COLUMN,
+            _build_aspect_sentiment_dataframe,
+            _build_top_keywords_dataframe,
+            _daily_sentiment_percentages,
+            enrich_with_nlp,
+            extract_item_id,
+        )
+
+        self.assertEqual(extract_item_id("Tiki", "https://tiki.vn/sach-nha-gia-kim-p52789367.html"), "52789367")
+        sample_ui_df = pd.DataFrame({
+            DISPLAY_COLUMNS[0]: ["User A", "User B", "User C"],
+            DISPLAY_COLUMNS[1]: [5, 3, 5],
+            DISPLAY_COLUMNS[2]: [
+                "Sách đóng gói cẩn thận, giao hàng rất nhanh",
+                "Bình bị rỉ nước, lỗi nắp không kín",
+                "",
+            ],
+            REVIEW_TIME_COLUMN: pd.to_datetime([
+                "2026-11-01T10:00:00Z",
+                "2026-11-02T10:00:00Z",
+                "2026-11-02T12:00:00Z",
+            ]),
+        })
+        enriched = enrich_with_nlp(sample_ui_df, platform="Tiki")
+        self.assertIn("sentiment_label", enriched.columns)
+        self.assertIn("Aspects hiển thị", enriched.columns)
+        self.assertEqual(list(enriched["sentiment_label"]), ["Positive", "Negative", "Positive"])
+
+        asp_df = _build_aspect_sentiment_dataframe(enriched)
+        self.assertFalse(asp_df.empty)
+        kw_pos = _build_top_keywords_dataframe(enriched, "Positive")
+        self.assertFalse(kw_pos.empty)
+        trend_df = _daily_sentiment_percentages(enriched)
+        self.assertFalse(trend_df.empty)
+
 
 if __name__ == "__main__":
     unittest.main()

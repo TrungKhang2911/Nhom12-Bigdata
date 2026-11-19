@@ -1,0 +1,177 @@
+BÁO CÁO TIẾN ĐỘ DỰ ÁN BIG DATA THU THẬP VÀ PHÂN TÍCH ĐÁNH GIÁ
+Cập nhật: 12/11/2026
+
+1. TỔNG QUAN
+
+Dự án đã hoàn thành cấu trúc repository và có các thành phần thu thập dữ liệu
+hoạt động cho Google Play, App Store và Tiki. Luồng thu thập local có khả năng
+ghi dữ liệu gốc, phân trang, tiếp tục sau khi bị gián đoạn và xuất JSON, JSONL,
+CSV. Giao diện Streamlit đã được xây dựng để crawl trực tiếp một sản phẩm/ứng
+dụng và xem nhanh kết quả cùng các biểu đồ rating.
+
+Trạng thái hiện tại phù hợp với mục tiêu demo thu thập và trực quan hóa rating.
+Chưa thể xem là pipeline Big Data phân tích cảm xúc hoàn chỉnh: các bước Spark,
+làm sạch/chuẩn hóa, NLP, sentiment, MongoDB serving và dashboard tích hợp vẫn
+chưa được triển khai nghiệp vụ hoặc chưa được nối thành một luồng end-to-end.
+
+2. CÁC HẠNG MỤC ĐÃ HOÀN THÀNH
+
+2.1. Cấu trúc và cấu hình
+
+- Repository có các thư mục config, data, docs, notebooks, src và tests.
+- Các cấu hình crawl mẫu nằm trong config; cấu hình runtime dùng biến môi
+  trường thông qua config/settings.py và file .env.
+- requirements-crawler.txt tách các thư viện phục vụ crawler;
+  requirements-ui.txt tách các thư viện cần để chạy demo Streamlit.
+  requirements.txt tham chiếu requirement.txt cho bộ dependencies đầy đủ.
+- README.md có hướng dẫn crawl và chạy giao diện. Yêu cầu môi trường cho toàn
+  bộ pipeline trong README là Python 3.10.11, JDK 11 và Hadoop winutils 3.3.6.
+  Giao diện demo đã được kiểm tra trong virtual environment Python 3.12.2,
+  nhưng điều này không thay thế yêu cầu Python 3.10 cho PySpark.
+
+2.2. Thu thập Google Play và App Store
+
+- Crawler nằm trong src/ingestion/gplay_crawler.py và
+  src/ingestion/appstore_crawler.py.
+- Hỗ trợ phân trang, giới hạn số review, retry một số lỗi mạng, validate app ID
+  và giữ payload review gốc trong envelope.
+- CLI tại src/ingestion/cli.py hỗ trợ xuất JSONL; có tùy chọn gửi Kafka nếu
+  broker được cấu hình.
+- Luồng collector tại src/ingestion/collect.py và source_pages.py bổ sung
+  checkpoint SQLite, resume cursor, timeout, báo cáo trạng thái từng job và
+  export dữ liệu thành JSON, JSONL, CSV.
+
+2.3. Thu thập Tiki
+
+- Tiki được nối vào collector chung, dùng API phân trang, lưu checkpoint và
+  xuất cùng các định dạng JSON/JSONL/CSV.
+- Báo cáo trong data/raw/ecommerce_reviews/report.json ghi nhận 4 sản phẩm
+  với tổng mục tiêu 2.300 và thu được đủ 2.300 review. Cả 4 job có trạng thái
+  complete; report ghi all_targets_met=true.
+- Dữ liệu hiện có trong data/raw/ecommerce_reviews gồm tiki.json,
+  tiki.jsonl, tiki.csv, checkpoint.sqlite3 và report.json.
+
+2.4. Giao diện Streamlit
+
+- Giao diện tại src/ui/app.py cho phép chọn Tiki, Google Play hoặc App Store,
+  nhập URL, đặt giới hạn crawl và bắt đầu lấy dữ liệu.
+- URL được validate theo host nền tảng và tách ID sản phẩm/app trước khi gọi
+  crawler. Crawler được gọi trực tiếp; dữ liệu hiển thị không phải dashboard
+  đọc từ MongoDB hay kho dữ liệu đã xử lý.
+- Kết quả gồm bảng tên người dùng, số sao và nội dung comment; có biểu đồ cột
+  số lượng theo rating và biểu đồ tròn tỷ lệ các rating.
+- Biểu đồ đường gồm 5 đường tương ứng rating 1-5. Mỗi mốc theo ngày là tỷ lệ
+  tích lũy từ đầu tập dữ liệu đến ngày đó, không phải tỷ lệ riêng trong ngày.
+- Ngày review được đọc theo định dạng của từng crawler; review thiếu ngày hoặc
+  ngày sai không được đưa vào biểu đồ thời gian.
+- Để Streamlit hiển thị dataframe ổn định với NumPy 1.26.4,
+  requirements-ui.txt khóa PyArrow 19.0.1. Bộ UI dependencies đã được cài và
+  app smoke test thành công trong môi trường hiện tại.
+
+3. SỐ LIỆU DỮ LIỆU HIỆN CÓ
+
+Theo các report và file trong data/raw tại thời điểm cập nhật:
+
+- Google Play: 2.000 review, từ hai ứng dụng Facebook và Instagram, mỗi ứng
+  dụng 1.000 review.
+- App Store: 250 review, gồm 100 review của app ID 284882215 và 150 review của
+  app ID 389801252. Hai job đã hết dữ liệu trên các trang RSS được lấy trong
+  đợt chạy; report ghi source_exhausted, tổng mục tiêu 1.000 và còn thiếu 750.
+- Tiki: 2.300 review từ 4 sản phẩm, đạt tổng mục tiêu mẫu.
+- Tổng số review trong các output mẫu hiện có: 4.550. Đây là số liệu mẫu của
+  repository, không phải chỉ tiêu chính thức của đề tài.
+
+Lưu ý: docs/verification.md có ghi kết quả một đợt kiểm tra trước đó đạt 3.000
+review mobile. Tuy nhiên report mobile đang có trong data/raw/mobile_reviews/
+được tạo ngày 06/11/2026 ghi tổng 2.250/3.000: Google Play đạt 2.000/2.000,
+App Store thu được 250/1.000. Khi viết báo cáo chính thức nên sử dụng report
+gần nhất và nêu rõ đợt dữ liệu/thư mục được trích dẫn, tránh nhầm số liệu giữa
+các đợt thử nghiệm.
+
+Dữ liệu mẫu Tiki được docs/verification.md phân tích ở đợt kiểm tra trước:
+chỉ khoảng 29% review có nội dung văn bản; rating lệch mạnh về 5 sao (khoảng
+87,5%), trong khi nhóm 1-2 sao rất ít. Điều này cần được xem xét khi chọn dữ
+liệu và đánh giá mô hình NLP. Các số liệu này là kết quả phân tích mẫu ghi
+trong tài liệu kiểm thử, không phải kết quả NLP từ pipeline.
+
+4. CÁC THÀNH PHẦN CHƯA HOÀN THÀNH / GIỚI HẠN
+
+- Shopee: adapter và kiểm thử xử lý lỗi đã có, nhưng endpoint công khai bị
+  Shopee chặn (HTTP 403 / error 90309999). Chưa thu thập được dataset Shopee
+  bằng cách crawl hiện tại. Tài liệu dự án chủ trương không giả lập chữ ký
+  request hay né anti-bot. Nhóm cần quyết định dùng dataset công khai có quyền
+  sử dụng, đổi nguồn thu thập, hay loại Shopee khỏi phạm vi.
+- Spark và schema mapping: src/processing/spark_session.py,
+  spark_streaming_job.py, data_cleaner.py, nlp_pipeline.py và các mapper hiện
+  là scaffold, chưa có logic xử lý/nghiệp vụ hoàn chỉnh.
+- NLP/cảm xúc: chưa có pipeline làm sạch văn bản, gán nhãn Tích cực/Tiêu cực/
+  Trung tính, tính sentiment score, word count hay trích xuất aspects.
+- Serving: src/serving/mongo_client.py hiện là scaffold; chưa có luồng ghi/tra
+  cứu kết quả đã xử lý trên MongoDB.
+- Kafka/Docker: docker-compose.yml khai báo Zookeeper, Kafka và MongoDB, và
+  producer Kafka có trong src/streaming. Tuy nhiên, tài liệu xác nhận chưa có
+  đợt chạy end-to-end với broker thật. UI hiện không đọc/ghi qua Kafka, Spark
+  hay MongoDB.
+- UI hiện là demo crawl và thống kê rating, không phải dashboard NLP/BI đầy đủ.
+  Dữ liệu crawl từ UI được giữ trong session giao diện; UI không ghi vào
+  checkpoint collector hay các file raw dataset.
+- Chưa có chỉ tiêu review, danh sách đối tượng crawl, phạm vi sentiment hoặc
+  tiêu chí nghiệm thu chính thức được xác nhận trong README.
+
+5. KIỂM THỬ VÀ TÌNH TRẠNG MÔI TRƯỜNG
+
+- Trong đợt kiểm tra ngày 12/11/2026, các module test_collection.py,
+  test_tiki.py và test_shopee.py chạy riêng thành công: 13 + 13 + 10 = 36 tests.
+- Chạy toàn bộ unittest discover hiện báo lỗi khi import test_crawlers.py:
+  ModuleNotFoundError: No module named 'kafka.vendor.six.moves'. Do đó, toàn
+  bộ test suite chưa được xác nhận xanh trong virtual environment hiện tại.
+  Cần sửa/xác nhận tương thích dependency kafka-python và chạy lại full suite.
+- Các kiểm tra UI trước đó gồm py_compile, smoke test Streamlit, chuẩn hóa ngày
+  từ ba nền tảng và tính tỷ lệ rating tích lũy theo ngày.
+- Báo cáo kiểm thử chi tiết các đợt crawl và kiểm tra payload đã có tại
+  docs/verification.md. Kết quả trong tài liệu này thuộc các đợt kiểm tra trước
+  đó; không tự động đồng nghĩa với một lần chạy lại mới nhất.
+
+6. ĐÁNH GIÁ TIẾN ĐỘ
+
+Phần thu thập dữ liệu theo lô và demo Streamlit đã đạt mức có thể trình diễn
+cho các nguồn hỗ trợ. Phần quan trọng còn thiếu để đạt mục tiêu Big Data hoàn
+chỉnh là pipeline xử lý và tích hợp sau ingestion: chuẩn hóa schema, làm sạch,
+NLP/sentiment, lưu kết quả, truy vấn và dashboard phân tích; đồng thời cần xác
+nhận vận hành Kafka/Spark/MongoDB trên môi trường đáp ứng yêu cầu.
+
+Không nên báo cáo rằng đã hoàn thành phần sentiment analysis hoặc pipeline
+real-time. Hiện có khả năng crawl review và trực quan hóa phân bố/tiến trình
+rating, nhưng chưa có model hay kết quả phân loại cảm xúc.
+
+7. ĐỀ XUẤT CÁC BƯỚC TIẾP THEO
+
+1. Nhóm xác nhận phạm vi, danh sách sản phẩm/app, quota, storefront/ngôn ngữ,
+   định dạng đầu ra và tiêu chí nghiệm thu; quyết định cách xử lý nguồn Shopee.
+2. Kiểm tra và đồng bộ môi trường Python 3.10.11/JDK 11 theo yêu cầu Spark;
+   xử lý lỗi import kafka.vendor.six.moves và chạy lại toàn bộ tests.
+3. Hoàn thiện unified schema và mapper cho từng nguồn; viết test cho rating,
+   review_time, username, review text và giá trị thiếu.
+4. Triển khai làm sạch/loại trùng và pipeline NLP; chọn mô hình/nguồn nhãn,
+   cách xử lý mất cân bằng rating, và quy trình đánh giá kết quả.
+5. Nối Kafka -> Spark processing -> MongoDB, sau đó kiểm tra với dữ liệu mẫu
+   và ghi nhận kịch bản khởi động/dừng hệ thống.
+6. Mở rộng UI để đọc kết quả đã xử lý từ serving layer, thêm lọc theo nguồn,
+   sản phẩm, khoảng thời gian và nhãn cảm xúc; tách dashboard khỏi thao tác
+   crawl trực tiếp.
+7. Chuẩn hóa docs/verification.md theo từng đợt crawl, ghi rõ ngày giờ,
+   config, output folder, số review đạt/không đạt và lệnh test đã chạy.
+
+8. CÁC ĐƯỜNG DẪN THAM KHẢO TRONG REPOSITORY
+
+- Hướng dẫn tổng quan và lệnh chạy: README.md
+- Hướng dẫn crawler và giới hạn nguồn: docs/crawlers.md
+- Số liệu các đợt kiểm tra: docs/verification.md
+- Collector/checkpoint/export: src/ingestion/collect.py,
+  src/ingestion/dataset.py, src/ingestion/source_pages.py
+- Crawler: src/ingestion/gplay_crawler.py,
+  src/ingestion/appstore_crawler.py, src/ingestion/tiki_crawler.py,
+  src/ingestion/shopee_crawler.py
+- Giao diện demo: src/ui/app.py
+- Mẫu dữ liệu và report gần nhất: data/raw/mobile_reviews/ và
+  data/raw/ecommerce_reviews/

@@ -1,0 +1,7 @@
+-r requirements-crawler.txt
+
+numpy==1.26.4
+pandas==2.2.1
+pyarrow==19.0.1
+streamlit==1.32.2
+plotly==5.20.0

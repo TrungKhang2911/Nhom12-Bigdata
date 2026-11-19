@@ -6,7 +6,7 @@ dùng chung cho Tiki. Riêng Tiki và Shopee xem [mục Tiki](#tiki) và [mục 
 ## Chạy local, xuất JSON và CSV
 
 Chạy tại gốc bằng Python 3.10.11. Không cần Kafka, Docker, Java hoặc Spark.
-Workspace đã có `.venv`. Máy khác cần tạo venv và cài `requirements-crawler.txt`.
+Workspace đã có `.venv`. Máy khác cần tạo venv và cài `requirements.txt`.
 
 ```powershell
 # File mẫu; sửa app_id và limit theo chỉ tiêu của nhóm

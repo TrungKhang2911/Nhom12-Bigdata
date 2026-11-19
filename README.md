@@ -135,18 +135,41 @@ Crawler **Shopee** chưa làm được: Shopee chặn mọi API công khai bằn
 (HTTP 403, error 90309999); phương án thay thế đang chờ nhóm quyết định, xem
 mục Shopee trong [docs/crawlers.md](docs/crawlers.md).
 
-Các module Shopee, Spark, schema mapper, NLP, MongoDB client và UI hiện
-**chỉ là khung cho các thành viên khác**, chưa có xử lý nghiệp vụ. Hai notebook
-là notebook khởi tạo. File Parquet chỉ được tạo khi pipeline xử lý thực sự có
-dữ liệu; repository không chứa file Parquet giả.
+Các module Shopee, Spark, schema mapper và MongoDB client hiện
+**chỉ là khung cho các thành viên khác**, chưa có xử lý nghiệp vụ.
+Pipeline **NLP & Phân tích cảm xúc đa lĩnh vực** đã được triển khai hoàn chỉnh
+tại `src/processing/nlp_pipeline.py`, `src/processing/vn_text_preprocessor.py`
+và `src/processing/raw_data_quality_stats.py` (kèm mô hình SVM tại
+`models/3_Max_Single_F1_SVM.pkl` và notebook EDA `notebooks/01_exploratory_analysis.ipynb`).
+Giao diện **UI Streamlit** (`src/ui/app.py`) cho phép crawl trực tiếp hoặc nạp
+dữ liệu thu thập sẵn từ Tiki, Google Play và App Store, tự động chạy pipeline NLP
+và trực quan hóa cả thống kê điểm đánh giá (rating) lẫn phân tích cảm xúc, chất
+lượng bình luận và khía cạnh (aspects).
+
+## Thiết lập môi trường ảo (venv) & Cài đặt thư viện
+
+Chạy các lệnh sau trên PowerShell tại thư mục gốc của dự án để khởi tạo môi trường ảo và cài đặt toàn bộ thư viện:
+
+```powershell
+# 1. Tạo môi trường ảo .venv
+python -m venv .venv
+
+# 2. Kích hoạt môi trường ảo
+.\.venv\Scripts\Activate.ps1
+
+# 3. Cài đặt toàn bộ thư viện từ requirements.txt
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+# 4. Tạo file cấu hình biến môi trường (nếu chưa có)
+Copy-Item .env.example .env
+```
+
+*(Lưu ý: Nếu PowerShell chặn chạy script khi kích hoạt venv, chạy lệnh `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` trước bước 2).*
 
 ## Chạy crawler nhanh (PowerShell)
 
 ```powershell
-py -3.10 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-crawler.txt
-Copy-Item .env.example .env
-
 # Sửa danh sách app và limit trong file cấu hình theo chỉ tiêu của nhóm
 Copy-Item config/crawl_jobs.example.json config/crawl_jobs.json
 
@@ -157,14 +180,28 @@ Copy-Item config/crawl_jobs.example.json config/crawl_jobs.json
 Copy-Item config/crawl_jobs.tiki.example.json config/crawl_jobs.tiki.json
 .\.venv\Scripts\python.exe -m src.ingestion.collect --config config/crawl_jobs.tiki.json --output-dir data/raw/ecommerce_reviews
 
-# Kiểm thử không gọi API thật
+# Kiểm thử tự động (Crawler + NLP Pipeline)
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 Nếu `.venv` đã được chuẩn bị trong workspace thì dùng trực tiếp Python trong
 đó, không cần tạo lại. Crawler chạy độc lập, không cần Java, Spark hay Docker.
-Cài toàn bộ dependencies cho các phần khác bằng `pip install -r requirements.txt`
-(file này tham chiếu danh sách gốc `requirement.txt`).
+
+## Chạy giao diện Demo Streamlit (Crawl + Trực quan hóa NLP)
+
+Sau khi đã kích hoạt môi trường ảo `.venv` và cài đặt thư viện, khởi động ứng dụng Web UI bằng lệnh:
+
+```powershell
+streamlit run src/ui/app.py
+```
+
+Hoặc chạy trực tiếp bằng Python trong `.venv` mà không cần kích hoạt:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run src/ui/app.py
+```
+
+Streamlit sẽ mở địa chỉ local (thường là `http://localhost:8501`) trên trình duyệt. Chọn nền tảng, dán URL sản phẩm/ứng dụng, chọn số bình luận tối đa rồi bấm **Bắt đầu Crawl & Phân tích** (hoặc nạp bộ dữ liệu đã crawl sẵn trong `data/raw/`) để xem bảng dữ liệu và các biểu đồ trực quan hóa Rating & NLP.
 
 README hiện không có chỉ tiêu số review hay danh sách ứng dụng bắt buộc. Cấu hình
 mẫu là Facebook/Instagram tại VN, mục tiêu mẫu tổng 3.000 review; đây không phải

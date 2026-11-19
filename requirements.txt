@@ -1,2 +1,24 @@
-# Keep the original dependency list compatible with existing setup commands.
--r requirement.txt
+# Thu thập dữ liệu (Ingestion)
+requests==2.31.0
+google-play-scraper==1.2.4
+
+# Luân chuyển & Xử lý Big Data (Streaming & Processing)
+kafka-python==2.0.2
+pyspark==3.5.1
+
+# Xử lý ngôn ngữ & Toán học (NLP & Data)
+numpy==1.26.4
+pandas==2.2.1
+pyarrow==19.0.1
+scikit-learn==1.4.1.post1
+# underthesea  # Mở comment khi nhóm NLP triển khai (yêu cầu pip install maturin trước trên Python 3.12)
+pyvi==0.1.1
+joblib==1.4.2
+
+# Lưu trữ & Giao diện (Serving & UI)
+pymongo==4.6.3
+streamlit==1.32.2
+plotly==5.20.0
+
+# Tiện ích (Utilities)
+python-dotenv==1.0.1

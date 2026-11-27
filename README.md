@@ -44,11 +44,14 @@ multi-domain-sentiment-bigdata/
 ├── src/                                   # Mã nguồn chính của hệ thống (Source Code)
 │   ├── __init__.py
 │   │
-│   ├── ingestion/                         # 1. THU THẬP: Module cào dữ liệu thuần túy (CHỈ CÀO, KHÔNG XỬ LÝ)
+│   ├── ingestion/                         # 1. THU THẬP: Module cào dữ liệu thuần túy & nạp MongoDB
 │   │   ├── __init__.py
 │   │   ├── tiki_crawler.py                # Cào JSON nguyên bản từ Tiki API
-│   │   ├── shopee_crawler.py              # Cào JSON nguyên bản từ Shopee API
-│   │   └── gplay_crawler.py               # Cào JSON nguyên bản từ Google Play
+│   │   ├── shopee_crawler.py              # Khung crawler Shopee (đang bị chặn anti-bot)
+│   │   ├── gplay_crawler.py               # Cào JSON nguyên bản từ Google Play
+│   │   ├── appstore_crawler.py            # Cào JSON nguyên bản từ Apple App Store
+│   │   ├── collect.py                     # Điều phối thu thập local (SQLite checkpoint, xuất JSON/JSONL/CSV)
+│   │   └── import_to_mongo.py             # Nạp batch file JSONL vào MongoDB (kèm audit & xử lý lỗi)
 │   │
 │   ├── streaming/                         # 2. ĐỆM DỮ LIỆU: Module điều phối luồng thời gian thực (Kafka)
 │   │   ├── __init__.py
@@ -79,7 +82,8 @@ multi-domain-sentiment-bigdata/
 │
 ├── .env.example                           # Mẫu cấu hình biến môi trường (Database URLs, API keys)
 ├── .gitignore                             # Các file/thư mục không đưa lên Git (venv, cache, file parquet lớn)
-├── docker-compose.yml                     # Cấu hình hạ tầng Big Data tối giản (Chỉ khởi tạo Kafka, Zookeeper, MongoDB)
+├── docker-compose.yml                     # Cấu hình hạ tầng Big Data tối giản (Kafka, Zookeeper, MongoDB)
+├── init_mongo.py                          # Khởi tạo database MongoDB, 7 collections, index & schema validation
 ├── requirements.txt                       # Danh sách thư viện Python cần thiết (pyspark, kafka-python, pymongo, streamlit...)
 └── README.md                              # Tài liệu hướng dẫn cài đặt và mô tả đồ án cho giảng viên
 ```
@@ -117,28 +121,62 @@ Java Development Kit (JDK): 11 (OpenJDK 11 hoặc Oracle JDK 11). Dù JDK 17 đ�
 Hadoop (winutils): 3.3.6.
 Docker Desktop: Phiên bản mới nhất.   
 
-## Trạng thái triển khai
+## Kiến trúc Cơ sở dữ liệu
 
-Đã dựng cấu trúc trên ngay tại thư mục gốc repository. Crawler Google Play và
-App Store được triển khai tại `src/ingestion/gplay_crawler.py` và
-`src/ingestion/appstore_crawler.py`, có CLI đơn giản lưu JSONL và tùy chọn Kafka.
-Luồng thu thập local hoàn thiện chạy qua `src/ingestion/collect.py`, sử dụng
-adapter phân trang `source_pages.py`: xuất **JSON + JSONL + CSV**, checkpoint
-SQLite, timeout, tiếp tục job khác khi lỗi và báo cáo số lượng thiếu.
-Kafka được để lại cho giai đoạn tích hợp sau.
-Thêm `data/raw/` để lưu dữ liệu thu thập cục bộ, `tests/` để kiểm thử và
-`src/processing/schema_mappers/appstore_mapper.py` làm khung tích hợp Apple.
+Hệ thống sử dụng mô hình **lưu trữ đa tầng** kết hợp giữa **SQLite cục bộ** ở bước thu thập và **MongoDB 7.0** (database mặc định: `sentiment`, hỗ trợ chạy cục bộ qua `docker-compose.yml` hoặc MongoDB Atlas qua `.env`) làm kho dữ liệu trung tâm:
 
-Crawler **Tiki** (`src/ingestion/tiki_crawler.py`) dùng chung luồng `collect.py`
-ở trên (checkpoint, resume, report, xuất `tiki.json`/`tiki.jsonl`/`tiki.csv`).
-Crawler **Shopee** chưa làm được: Shopee chặn mọi API công khai bằng anti-bot
-(HTTP 403, error 90309999); phương án thay thế đang chờ nhóm quyết định, xem
-mục Shopee trong [docs/crawlers.md](docs/crawlers.md).
+```text
+[Crawlers] ──▶ [SQLite WAL: checkpoint.sqlite3] ──▶ [JSON / JSONL / CSV]
+                                                            │
+                                          import_to_mongo.py (batch upsert)
+                                                            ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                       MongoDB — Database: sentiment                        │
+│                                                                            │
+│  [Metadata / Dimension]   sources ◄── entities                             │
+│  [Bronze — Raw Landing]   raw_reviews  (giữ JSON gốc + hàng đợi pending)   │
+│  [Silver — Curated]       reviews      (Unified Schema + kết quả NLP)      │
+│  [Gold — Pre-aggregated]  daily_metrics (chỉ số tổng hợp theo ngày cho BI) │
+│  [Control Plane / Audit]  pipeline_runs  &  rejected_records               │
+└────────────────────────────────────────────────────────────────────────────┘
+```
 
-Các module Shopee, Spark, schema mapper, NLP, MongoDB client và UI hiện
-**chỉ là khung cho các thành viên khác**, chưa có xử lý nghiệp vụ. Hai notebook
-là notebook khởi tạo. File Parquet chỉ được tạo khi pipeline xử lý thực sự có
-dữ liệu; repository không chứa file Parquet giả.
+### Danh sách 7 Collections trong MongoDB (`init_mongo.py`)
+
+| Tầng | Collection | Vai trò chính | Index nổi bật |
+| :--- | :--- | :--- | :--- |
+| **Metadata** | `sources` | Danh mục nguồn dữ liệu (`tiki`, `google_play`, `app_store`, ...) và trạng thái bật/tắt | `_id` (tên nguồn) |
+| **Metadata** | `entities` | Thông tin đối tượng đánh giá (sản phẩm/ứng dụng), tách riêng để tránh lặp metadata trong từng review | `entity_identity` (unique: `source_domain`, `country`, `item_id`) |
+| **Bronze (Raw)** | `raw_reviews` | Lưu nguyên bản JSON thu thập (`raw_review`), trích xuất nhanh vài trường lõi và trạng thái hàng đợi `ingest.status` (`pending` → `done`) | `raw_ingest_queue` (`source_domain`, `ingest.status`, `collected_at DESC`); `raw_reviews_by_entity_time` |
+| **Silver (NLP)** | `reviews` | Review sau khi làm sạch, chuẩn hóa Unified Schema và gán nhãn cảm xúc/khía cạnh | `reviews_by_entity_time`; `reviews_by_source_sentiment_time` |
+| **Gold (BI)** | `daily_metrics` | Số liệu tổng hợp sẵn theo ngày giúp Dashboard truy vấn tức thì | `daily_metrics_lookup` (unique, chuẩn ESR: `source_domain`, `entity_key`, `date DESC`) |
+| **Audit / Ops** | `pipeline_runs` | Nhật ký từng đợt nạp/xử lý (`run_id`, `stage`, `status`, `started_at`, `finished_at`, `stats`) | `pipeline_runs_by_start` (`started_at DESC`) |
+| **Audit / Ops** | `rejected_records` | Cô lập bản ghi lỗi định dạng JSON hoặc thiếu trường bắt buộc theo từng `run_id` | `rejected_records_by_run` (`run_id`, `created_at DESC`) |
+
+### Đặc điểm kỹ thuật chính của tầng CSDL
+- **Chống trùng lặp (Idempotency)**: Khóa `_id` của `entities` và `raw_reviews` được sinh tất định bằng băm `SHA-256` (`[source, country, item_id]` và `[source, country, item_id, source_review_id]`), kết hợp `bulk_write` + `upsert` nên nạp lại file cũ không tạo dữ liệu trùng.
+- **Tối ưu ghi & cập nhật metadata**: Gom trùng `entities` trong từng batch trước khi ghi; tự động cập nhật `item_name` và `raw_metadata` khi có thông tin mới mà không ghi đè bằng giá trị rỗng.
+- **Kiểm duyệt dữ liệu (`$jsonSchema`)**: Cả 7 collections đều gắn MongoDB Schema Validation (`validationLevel: "moderate"`) kiểm tra trường bắt buộc, điểm `rating` trong khoảng `0..5` và tập trạng thái hợp lệ.
+- **Bảo mật cục bộ**: `docker-compose.yml` cấu hình xác thực root qua biến môi trường (`MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`) và `healthcheck`.
+
+## Trạng thái triển khai (Tiến độ hiện tại)
+
+### Đã hoàn thành
+- **Thu thập dữ liệu (Ingestion)**:
+  - Triển khai crawler **Google Play** (`src/ingestion/gplay_crawler.py`), **App Store** (`src/ingestion/appstore_crawler.py`) và **Tiki** (`src/ingestion/tiki_crawler.py`).
+  - Luồng thu thập cục bộ `src/ingestion/collect.py` (dùng adapter phân trang `source_pages.py`): xuất **JSON + JSONL + CSV**, checkpoint **SQLite**, hỗ trợ resume khi gián đoạn, timeout, tiếp tục job khác khi lỗi và xuất `report.json`.
+- **Cơ sở dữ liệu MongoDB & Nạp dữ liệu (Storage & Serving)**:
+  - Khởi tạo CSDL tại `init_mongo.py` (7 collections, index tối ưu ESR/unique, JSON Schema validation, seed `sources`).
+  - Triển khai `src/serving/mongo_client.py` và `src/ingestion/import_to_mongo.py`: nạp batch JSONL vào `raw_reviews` / `entities` / `sources`, tự động ghi nhật ký vào `pipeline_runs`, lưu bản ghi lỗi vào `rejected_records`, đồng thời cung cấp sẵn các hàm `upsert_processed_reviews` và `upsert_daily_metrics` cho tầng xử lý sau.
+  - Cấu hình `docker-compose.yml` (MongoDB 7.0 có auth + healthcheck, Kafka, Zookeeper) và `.env.example`.
+- **Kiểm thử (Testing)**:
+  - Bộ unit test không gọi API thật trong `tests/` cho crawler (`test_crawlers.py`, `test_collection.py`, `test_tiki.py`, `test_shopee.py`) và tầng MongoDB (`test_mongo.py`).
+
+### Chưa hoàn thành / Đang chờ tích hợp
+- **Crawler Shopee**: Bị chặn mọi API công khai bởi cơ chế anti-bot (HTTP 403, error 90309999); phương án thay thế đang chờ nhóm quyết định, xem mục Shopee trong [docs/crawlers.md](docs/crawlers.md).
+- **Xử lý Big Data & NLP (`src/processing/*`)**: Các module `spark_session.py`, `schema_mappers/*`, `data_cleaner.py`, `nlp_pipeline.py`, `spark_streaming_job.py` hiện mới là khung cho thành viên phụ trách.
+- **Giao diện Dashboard (`src/ui/app.py`)**: Hiện mới là khung chờ tích hợp với `reviews` và `daily_metrics`.
+- **Tích hợp Kafka & Gold Layer Parquet**: Kafka (`src/streaming/kafka_producer.py`) và file Parquet (`data/gold_processed/`) sẽ được kết nối khi hoàn thiện pipeline PySpark. Hai notebook trong `notebooks/` hiện là notebook khởi tạo.
 
 ## Chạy crawler nhanh (PowerShell)
 
@@ -159,6 +197,20 @@ Copy-Item config/crawl_jobs.tiki.example.json config/crawl_jobs.tiki.json
 
 # Kiểm thử không gọi API thật
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+## Khởi tạo & Nạp dữ liệu vào MongoDB (PowerShell)
+
+```powershell
+# 1. Khởi chạy MongoDB cục bộ (bỏ qua nếu dùng MongoDB Atlas trong file .env)
+docker compose up -d mongodb
+
+# 2. Khởi tạo 7 collections, index, schema validation và nguồn mặc định
+.\.venv\Scripts\python.exe init_mongo.py
+
+# 3. Nạp dữ liệu JSONL đã cào vào MongoDB (có ghi pipeline_runs & rejected_records)
+.\.venv\Scripts\python.exe -m src.ingestion.import_to_mongo --input-dir data/raw/mobile_reviews --sources google_play app_store
+.\.venv\Scripts\python.exe -m src.ingestion.import_to_mongo --input-dir data/raw/ecommerce_reviews --sources tiki
 ```
 
 Nếu `.venv` đã được chuẩn bị trong workspace thì dùng trực tiếp Python trong

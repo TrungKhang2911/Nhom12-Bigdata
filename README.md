@@ -69,7 +69,9 @@ multi-domain-sentiment-bigdata/
 │   │   │   └── gplay_mapper.py            # Logic PySpark bóc tách và ánh xạ JSON của Google Play
 │   │   │
 │   │   ├── data_cleaner.py                # [XỬ LÝ CHUNG] Xóa trùng, lọc null, chuẩn hóa chữ trên Unified DataFrame
-│   │   ├── nlp_pipeline.py                # Xử lý teencode, tách từ, chạy mô hình AI gán nhãn cảm xúc
+│   │   ├── raw_data_quality_stats.py      # Thống kê chất lượng dữ liệu thô trước làm sạch
+│   │   ├── vn_text_preprocessor.py        # Tiền xử lý văn bản tiếng Việt (teencode, chuẩn hóa, tách từ)
+│   │   ├── nlp_pipeline.py                # Lọc nhiễu, phát hiện lệch ngành, gán nhãn cảm xúc 3 lớp (SVM) & trích xuất khía cạnh
 │   │   └── spark_streaming_job.py         # Nhạc trưởng: Đọc Kafka -> Gọi Mappers -> Gọi Cleaner -> NLP -> Ghi MongoDB
 │   │
 │   ├── serving/                           # 4. LƯU TRỮ: Module phục vụ truy vấn tốc độ cao
@@ -169,14 +171,17 @@ Hệ thống sử dụng mô hình **lưu trữ đa tầng** kết hợp giữa 
   - Khởi tạo CSDL tại `init_mongo.py` (7 collections, index tối ưu ESR/unique, JSON Schema validation, seed `sources`).
   - Triển khai `src/serving/mongo_client.py` và `src/ingestion/import_to_mongo.py`: nạp batch JSONL vào `raw_reviews` / `entities` / `sources`, tự động ghi nhật ký vào `pipeline_runs`, lưu bản ghi lỗi vào `rejected_records`, đồng thời cung cấp sẵn các hàm `upsert_processed_reviews` và `upsert_daily_metrics` cho tầng xử lý sau.
   - Cấu hình `docker-compose.yml` (MongoDB 7.0 có auth + healthcheck, Kafka, Zookeeper) và `.env.example`.
+- **Xử lý Ngôn ngữ Tự nhiên & Phân tích Cảm xúc (NLP — Bước 5)**:
+  - Triển khai `src/processing/nlp_pipeline.py`, `src/processing/vn_text_preprocessor.py`, `src/processing/raw_data_quality_stats.py` cùng mô hình SVM 3 lớp (`models/3_Max_Single_F1_SVM.pkl`): thống kê chất lượng dữ liệu thô, lọc nhiễu/bình luận lạc đề đa ngành, gán nhãn cảm xúc (`Positive` / `Neutral` / `Negative`) và trích xuất 8 nhóm khía cạnh (`extract_aspects`).
+  - Hoàn thiện notebook khám phá dữ liệu `notebooks/01_exploratory_analysis.ipynb`.
 - **Kiểm thử (Testing)**:
-  - Bộ unit test không gọi API thật trong `tests/` cho crawler (`test_crawlers.py`, `test_collection.py`, `test_tiki.py`, `test_shopee.py`) và tầng MongoDB (`test_mongo.py`).
+  - Bộ unit test không gọi API thật trong `tests/` cho crawler (`test_crawlers.py`, `test_collection.py`, `test_tiki.py`, `test_shopee.py`), tầng MongoDB (`test_mongo.py`) và tầng NLP (`test_nlp_pipeline.py`).
 
 ### Chưa hoàn thành / Đang chờ tích hợp
 - **Crawler Shopee**: Bị chặn mọi API công khai bởi cơ chế anti-bot (HTTP 403, error 90309999); phương án thay thế đang chờ nhóm quyết định, xem mục Shopee trong [docs/crawlers.md](docs/crawlers.md).
-- **Xử lý Big Data & NLP (`src/processing/*`)**: Các module `spark_session.py`, `schema_mappers/*`, `data_cleaner.py`, `nlp_pipeline.py`, `spark_streaming_job.py` hiện mới là khung cho thành viên phụ trách.
+- **Xử lý Big Data (PySpark)**: Các module `spark_session.py`, `schema_mappers/*`, `data_cleaner.py`, `spark_streaming_job.py` hiện mới là khung chờ tích hợp với NLP và MongoDB (`reviews`, `daily_metrics`).
 - **Giao diện Dashboard (`src/ui/app.py`)**: Hiện mới là khung chờ tích hợp với `reviews` và `daily_metrics`.
-- **Tích hợp Kafka & Gold Layer Parquet**: Kafka (`src/streaming/kafka_producer.py`) và file Parquet (`data/gold_processed/`) sẽ được kết nối khi hoàn thiện pipeline PySpark. Hai notebook trong `notebooks/` hiện là notebook khởi tạo.
+- **Tích hợp Kafka & Gold Layer Parquet**: Kafka (`src/streaming/kafka_producer.py`) và file Parquet (`data/gold_processed/`) sẽ được kết nối khi hoàn thiện pipeline PySpark (`notebooks/02_spark_test.ipynb` hiện là notebook khởi tạo).
 
 ## Chạy crawler nhanh (PowerShell)
 

@@ -177,7 +177,15 @@ class TestMongoClient(unittest.TestCase):
                 "source_domain": "tiki",
                 "country": "vn",
                 "item_id": "12345",
-                "app": {"name": "San pham A"},
+                "app": {
+                    "name": "San pham A",
+                    "description": "<p>Mo ta HTML rat dai...</p>",
+                    "images": [{"url": "https://example.com/1.jpg"}],
+                    "specifications": [{"name": "Thong so"}],
+                    "categories": {"name": "Sach"},
+                    "brand": {"name": "NXB Tre"},
+                    "price": 99000,
+                },
                 "review": {"id": "r2", "content": "tam on", "rating": 4, "created_at": 1700000001},
             },
             {
@@ -199,7 +207,12 @@ class TestMongoClient(unittest.TestCase):
         self.assertEqual(len(entity_ops), 1)
         update_doc = entity_ops[0]._doc
         self.assertEqual(update_doc["$set"]["item_name"], "San pham A")
-        self.assertEqual(update_doc["$set"]["raw_metadata"], {"name": "San pham A"})
+        self.assertEqual(update_doc["$set"]["category"], "Sach")
+        self.assertEqual(update_doc["$set"]["brand_or_developer"], "NXB Tre")
+        self.assertEqual(update_doc["$set"]["metadata"], {"price": 99000})
+        self.assertNotIn("description", update_doc["$set"]["metadata"])
+        self.assertNotIn("images", update_doc["$set"]["metadata"])
+        self.assertIn("raw_metadata", update_doc["$unset"])
 
         # Sources dùng schema thống nhất
         self.assertEqual(len(db.sources.update_one_calls), 1)

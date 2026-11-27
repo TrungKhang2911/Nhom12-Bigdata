@@ -35,12 +35,16 @@ COLLECTION_VALIDATORS = {
         "$jsonSchema": {
             "bsonType": "object",
             "required": ["_id", "source_domain", "country", "item_id"],
+            "not": {"required": ["raw_metadata"]},
             "properties": {
                 "_id": {"bsonType": "string"},
                 "source_domain": {"bsonType": "string"},
                 "country": {"bsonType": "string"},
                 "item_id": {"bsonType": "string"},
                 "item_name": {"bsonType": ["string", "null"]},
+                "category": {"bsonType": ["string", "null"]},
+                "brand_or_developer": {"bsonType": ["string", "null"]},
+                "metadata": {"bsonType": "object"},
                 "first_seen_at": {"bsonType": ["date", "null"]},
                 "last_seen_at": {"bsonType": ["date", "null"]},
             },

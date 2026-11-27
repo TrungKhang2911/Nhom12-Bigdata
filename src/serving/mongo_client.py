@@ -71,6 +71,87 @@ def _source_defaults(source):
     }
 
 
+def compact_entity_metadata(source, app_metadata):
+    """Lọc gọn metadata sản phẩm/ứng dụng: loại bỏ mô tả HTML, mảng ảnh và bảng thông số nặng."""
+    if not isinstance(app_metadata, dict) or not app_metadata:
+        return {
+            "item_name": None,
+            "category": None,
+            "brand_or_developer": None,
+            "metadata": {},
+        }
+
+    item_name = (
+        app_metadata.get("title")
+        or app_metadata.get("trackName")
+        or app_metadata.get("name")
+    )
+
+    category = None
+    brand_or_developer = None
+    metadata = {}
+
+    if source == "tiki":
+        cat_obj = app_metadata.get("categories")
+        if isinstance(cat_obj, dict):
+            category = cat_obj.get("name")
+        elif isinstance(cat_obj, str):
+            category = cat_obj
+        brand_obj = app_metadata.get("brand")
+        seller_obj = app_metadata.get("current_seller")
+        if isinstance(brand_obj, dict):
+            brand_or_developer = brand_obj.get("name")
+        if not brand_or_developer and isinstance(seller_obj, dict):
+            brand_or_developer = seller_obj.get("name")
+
+        for dst, src in (
+            ("price", "price"),
+            ("rating_average", "rating_average"),
+            ("review_count", "review_count"),
+            ("thumbnail_url", "thumbnail_url"),
+            ("short_url", "short_url"),
+        ):
+            if app_metadata.get(src) is not None:
+                metadata[dst] = app_metadata[src]
+    elif source == "google_play":
+        category = app_metadata.get("genre")
+        brand_or_developer = app_metadata.get("developer")
+        for dst, src in (
+            ("price", "price"),
+            ("rating_average", "score"),
+            ("review_count", "reviews"),
+            ("installs", "installs"),
+            ("thumbnail_url", "icon"),
+            ("url", "url"),
+        ):
+            if app_metadata.get(src) is not None:
+                metadata[dst] = app_metadata[src]
+    elif source == "app_store":
+        category = app_metadata.get("primaryGenreName")
+        if not category and isinstance(app_metadata.get("genres"), list) and app_metadata["genres"]:
+            category = str(app_metadata["genres"][0])
+        brand_or_developer = app_metadata.get("sellerName") or app_metadata.get("artistName")
+        for dst, src in (
+            ("price", "price"),
+            ("rating_average", "averageUserRating"),
+            ("review_count", "userRatingCount"),
+            ("thumbnail_url", "artworkUrl100"),
+            ("url", "trackViewUrl"),
+        ):
+            if app_metadata.get(src) is not None:
+                metadata[dst] = app_metadata[src]
+    else:
+        category = app_metadata.get("category") or app_metadata.get("genre")
+        brand_or_developer = app_metadata.get("brand") or app_metadata.get("developer")
+
+    return {
+        "item_name": str(item_name) if item_name else None,
+        "category": str(category) if category else None,
+        "brand_or_developer": str(brand_or_developer) if brand_or_developer else None,
+        "metadata": metadata,
+    }
+
+
 def _review_id(source, review):
     if source == "google_play":
         value = review.get("reviewId")
@@ -276,11 +357,7 @@ def ingest_raw_events(events, run_id, db=None):
             [source, country, item_id, source_review_id]
         )
 
-        item_name = (
-            app_metadata.get("title")
-            or app_metadata.get("trackName")
-            or app_metadata.get("name")
-        )
+        compact_meta = compact_entity_metadata(source, app_metadata)
 
         # Gom trùng entity trong cùng một batch để giảm số thao tác ghi lên MongoDB.
         existing_entity = entities_by_key.get(entity_key)
@@ -289,14 +366,20 @@ def ingest_raw_events(events, run_id, db=None):
                 "source_domain": source,
                 "country": country,
                 "item_id": item_id,
-                "item_name": item_name,
-                "raw_metadata": app_metadata,
+                "item_name": compact_meta["item_name"],
+                "category": compact_meta["category"],
+                "brand_or_developer": compact_meta["brand_or_developer"],
+                "metadata": compact_meta["metadata"],
             }
         else:
-            if item_name:
-                existing_entity["item_name"] = item_name
-            if app_metadata:
-                existing_entity["raw_metadata"] = app_metadata
+            if compact_meta["item_name"]:
+                existing_entity["item_name"] = compact_meta["item_name"]
+            if compact_meta["category"]:
+                existing_entity["category"] = compact_meta["category"]
+            if compact_meta["brand_or_developer"]:
+                existing_entity["brand_or_developer"] = compact_meta["brand_or_developer"]
+            if compact_meta["metadata"]:
+                existing_entity["metadata"] = compact_meta["metadata"]
 
         raw_document = {
             "_id": record_id,
@@ -337,16 +420,17 @@ def ingest_raw_events(events, run_id, db=None):
             "item_id": info["item_id"],
             "first_seen_at": now,
         }
-        # Cho phép cập nhật tên & metadata mới khi có dữ liệu, không ghi đè bằng rỗng.
-        if info["item_name"]:
-            set_fields["item_name"] = info["item_name"]
-        else:
-            set_on_insert["item_name"] = None
+        # Cho phép cập nhật tên, ngành hàng, thương hiệu & metadata gọn khi có dữ liệu.
+        for field in ("item_name", "category", "brand_or_developer"):
+            if info[field]:
+                set_fields[field] = info[field]
+            else:
+                set_on_insert[field] = None
 
-        if info["raw_metadata"]:
-            set_fields["raw_metadata"] = info["raw_metadata"]
+        if info["metadata"]:
+            set_fields["metadata"] = info["metadata"]
         else:
-            set_on_insert["raw_metadata"] = {}
+            set_on_insert["metadata"] = {}
 
         entity_ops.append(
             UpdateOne(
@@ -354,6 +438,7 @@ def ingest_raw_events(events, run_id, db=None):
                 {
                     "$setOnInsert": set_on_insert,
                     "$set": set_fields,
+                    "$unset": {"raw_metadata": ""},
                 },
                 upsert=True,
             )
